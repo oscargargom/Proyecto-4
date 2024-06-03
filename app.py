@@ -1,4 +1,5 @@
 import os, toml, sys
+import time
 from typing import Optional
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
@@ -17,12 +18,12 @@ import streamlit as st
 
 from langchain.agents import AgentExecutor, create_react_agent, load_tools
 from langchain_openai import OpenAI
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain.schema import ChatMessage
+from langchain_openai import ChatOpenAI
+import streamlit as st
 
 
-
-
-st.title("Streamlit - ChatBook")
-st.write("Streamlit app sobre El camino de los reyes")
 
 
 # Initialize Langfuse handler
@@ -82,9 +83,45 @@ rag_chain = (
     | StrOutputParser()
 )
 
-for chunk in rag_chain.stream("¿Que poderes tiene Kaladin?", config={"callbacks":[langfuse_handler]}):
-  print(chunk, end="", flush=True)
+#for chunk in rag_chain.stream("¿Que poderes tiene Kaladin?", config={"callbacks":[langfuse_handler]}):
+#  print(chunk, end="", flush=True)
     
 
 # STREAMLIT
 
+st.title("Streamlit - ChatBook")
+st.write("Streamlit app sobre El camino de los reyes")
+
+class StreamHandler(BaseCallbackHandler):
+    def __init__(self, container, initial_text=""):
+        self.container = container
+        self.text = initial_text
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        self.text += token
+        self.container.markdown(self.text)
+
+
+with st.sidebar:
+    openai_api_key = API_KEY
+
+if "messages" not in st.session_state:
+    st.session_state["messages"] = [ChatMessage(role="assistant", content="¿Qué duda tienes sobre el libro?")]
+
+# Busca el último mensaje con el rol 'assistant' y modifica su contenido
+for i in range(len(st.session_state["messages"]) - 1, -1, -1):
+    if st.session_state["messages"][i].role == 'assistant' and st.session_state["messages"][i].content != "¿Qué duda tienes sobre el libro?":
+        st.session_state["messages"][i].content = ''.join(st.session_state["messages"][i].content)
+        break
+
+for msg in st.session_state.messages:
+    st.chat_message(msg.role).write(msg.content)
+
+if prompt := st.chat_input():
+    st.session_state.messages.append(ChatMessage(role="user", content=prompt))
+    st.chat_message("user").write(prompt)
+
+    with st.chat_message("assistant"):
+        stream_handler = StreamHandler(st.empty())
+        response = rag_chain.stream(prompt, config={"callbacks":[stream_handler, langfuse_handler]})
+        st.session_state.messages.append(ChatMessage(role="assistant", content=response))
